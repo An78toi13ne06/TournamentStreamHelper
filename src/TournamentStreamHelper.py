@@ -156,7 +156,10 @@ def DownloadLayoutsOnBoot():
                     zip_file.extractall('./layout')
                 list_files = glob(f"./layout/TournamentStreamHelper-layouts-main/*")
                 for file_path in list_files:
-                    new_file_path = file_path.replace("TournamentStreamHelper-layouts-main/", "")
+                    if os.name == 'nt':
+                        new_file_path = file_path.replace("TournamentStreamHelper-layouts-main\\", "")
+                    else:
+                        new_file_path = file_path.replace("TournamentStreamHelper-layouts-main/", "")
                     os.rename(file_path, new_file_path)
                 os.rmdir(f"./layout/TournamentStreamHelper-layouts-main")
                 os.remove(zip_path)
@@ -164,8 +167,6 @@ def DownloadLayoutsOnBoot():
                 logger.error(f"Layouts could not be extracted\nError: {str(e)}")
         except Exception as e:
             logger.error(f"Layouts could not be downloaded\nError: {str(e)}")
-
-DownloadLayoutsOnBoot()
 
 def generate_restart_messagebox(main_txt):
     messagebox = QMessageBox()
@@ -825,6 +826,8 @@ class Window(QMainWindow):
         TSHScoreboardManager.instance.signals.ScoreboardAmountChanged.connect(
             self.ToggleTopOption)
         StateManager.Unset("completed_sets")
+
+        DownloadLayoutsOnBoot()
 
     def SetGame(self):
         index = next((i for i in range(self.gameSelect.model().rowCount()) if self.gameSelect.itemText(i) == TSHGameAssetManager.instance.selectedGame.get(
