@@ -2,18 +2,13 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy import uic
-import json
 import time
-from .Helpers.TSHCountryHelper import TSHCountryHelper
 from .StateManager import StateManager
-from .TSHGameAssetManager import TSHGameAssetManager
-from .TSHPlayerDB import TSHPlayerDB
 from .TSHTournamentDataProvider import TSHTournamentDataProvider
 from .SettingsManager import SettingsManager
 from .Helpers.TSHLocaleHelper import TSHLocaleHelper
 from .Helpers.TSHDirHelper import TSHResolve
 import traceback
-import os
 import shutil
 import urllib
 from loguru import logger
@@ -170,7 +165,7 @@ class TSHTournamentInfoWidget(QDockWidget):
             try:
                 widget: QWidget = self.findChild(QWidget, key)
 
-                if widget:
+                if widget and data[key] is not None:
                     if type(widget) == QLineEdit:
                         widget.setText(data[key])
                         widget.editingFinished.emit()

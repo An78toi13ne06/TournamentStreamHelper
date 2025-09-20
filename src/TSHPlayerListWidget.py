@@ -1,8 +1,6 @@
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from qtpy import uic
-import json
 import traceback
 from loguru import logger
 from .TSHPlayerListSlotWidget import TSHPlayerListSlotWidget
@@ -81,6 +79,16 @@ class TSHPlayerListWidget(QDockWidget):
         row = QWidget()
         row.setLayout(QHBoxLayout())
         topOptions.layout().addWidget(row)
+
+        showScoresWidget = QWidget()
+        showScoresWidget.setLayout(QVBoxLayout())
+        self.showScoresCheckbox = QCheckBox()
+        self.showScoresCheckbox.setChecked(False)
+        showScoresWidget.layout().addWidget(QLabel(QApplication.translate("app", "Show scores")))
+        showScoresWidget.layout().addWidget(self.showScoresCheckbox)
+        self.showScoresCheckbox.checkStateChanged.connect(
+            self.playerList.SetScoresVisible)
+        row.layout().addWidget(showScoresWidget)
 
         self.loadFromStandingsBt = QPushButton(
             QApplication.translate("app", "Load tournament standings"))

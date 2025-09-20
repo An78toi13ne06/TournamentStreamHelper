@@ -3,12 +3,15 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 import requests
 import os
+import pathlib
 import shutil
+import time
 import traceback
 import zipfile
 import json
 from loguru import logger
 import glob
+from ..SettingsManager import SettingsManager
 
 
 class TSHControllerHelperSignals(QObject):
@@ -25,13 +28,24 @@ class TSHControllerHelper(QObject):
         self.controller_list = {}
         self.controllerModel = QStandardItemModel()
 
-        self.UpdateControllerFile()
+        if SettingsManager.Get("general.disable_controller_file_downloading", False):
+            logger.debug("Skipping controller file download (SETTING ENABLED)")
+        else:
+            self.UpdateControllerFile()
         self.BuildControllerTree()
         self.UpdateControllerModel()
     
 
     def UpdateControllerFile(self):
         try:
+            out_dir = pathlib.Path('./assets/controller')
+
+            if out_dir.exists():
+                modtime = out_dir.stat().st_mtime
+                if time.time() - modtime <= (12 * 60 * 60):
+                    logger.debug("Skipping controller db download.")
+                    return
+
             url = 'https://github.com/Wolfy76700/ControllerDatabase/archive/refs/heads/main.zip'
             r = requests.get(url, allow_redirects=True)
 
@@ -96,13 +110,19 @@ class TSHControllerHelper(QObject):
                         icon_path = f"{controller_directory}/image.png"
                     else:
                         icon_path = None
+                        
+                    if os.path.exists(f"{controller_directory}/icon.png"):
+                        simple_icon_path = f"{controller_directory}/icon.png"
+                    else:
+                        simple_icon_path = None
 
                     controller_json = {
                         "name": config_json.get("name"),
                         "manufacturer": manufacturer,
                         "type": controller_type,
                         "icon_path": icon_path,
-                        "config_path": f"{controller_directory}/config.json"
+                        "config_path": f"{controller_directory}/config.json",
+                        "simple_icon_path": simple_icon_path
                     }
                     controller_list[controller_id] = controller_json
         self.controller_list = controller_list
@@ -128,6 +148,7 @@ class TSHControllerHelper(QObject):
 
                 
                 data["icon_path"] = self.controller_list[c].get("icon_path")
+                data["simple_icon_path"] = self.controller_list[c].get("simple_icon_path")
                 if data["icon_path"]:
                     item.setIcon(QIcon(QPixmap.fromImage(QImage(data["icon_path"])))
                     )

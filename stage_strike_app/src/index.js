@@ -1,14 +1,38 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App';
+import StageStrikePage from './StageStrikePage';
 import reportWebVitals from './reportWebVitals';
 
-ReactDOM.render(
+import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
+import ScoreboardPage from "./ScoreboardPage";
+import {darkTheme} from "./themes";
+import {ThemeProvider} from "@mui/material/styles";
+import {CssBaseline} from "@mui/material";
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-  document.getElementById('root')
+      <ThemeProvider theme={darkTheme}>
+          <CssBaseline />
+          <BrowserRouter>
+              <Routes>
+                  <Route
+                      path="/stage-strike-app"
+                      element={<StageStrikePage />}
+                  />
+                  <Route
+                      path="/scoreboard"
+                      element={<ScoreboardPage />}
+                  />
+                  <Route
+                      path="*"
+                      element={<Navigate to={"/stage-strike-app"} replace={true}/>}
+                  />
+              </Routes>
+          </BrowserRouter>
+      </ThemeProvider>
+  </React.StrictMode>
 );
 
 // If you want to start measuring performance in your app, pass a function

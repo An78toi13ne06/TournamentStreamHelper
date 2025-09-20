@@ -15,6 +15,7 @@ import traceback
 import time
 import os
 import unicodedata
+import socket
 import sys
 import atexit
 import time
@@ -47,7 +48,7 @@ fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
 if sys.stdout != None:
     config = {
         "handlers": [
-            {"sink": sys.stdout, "format": fmt},
+            {"sink": sys.stdout, "format": fmt, "level": "DEBUG"},
         ],
     }
     logger.configure(**config)
@@ -103,8 +104,17 @@ logger.critical("=== TSH IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
 
+from contextlib import contextmanager
+@contextmanager
+def catchtime(msg = ''):
+    from time import perf_counter
+    start = perf_counter()
+    yield lambda: perf_counter() - start
+    logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
+
 # autopep8: off
 from .Settings.TSHSettingsWindow import TSHSettingsWindow
+from .LayoutOptions.TSHLayoutOptionsWindow import TSHLayoutOptionsWindow
 from .TSHHotkeys import TSHHotkeys
 from .TSHPlayerListWidget import TSHPlayerListWidget
 from .TSHNotesWidget import TSHNotesWidget
@@ -285,6 +295,7 @@ class WindowSignals(QObject):
     DetectGame = Signal(int)
     SetupAutocomplete = Signal()
     UiMounted = Signal()
+    GameChanged = Signal()
 
 
 class Window(QMainWindow):
@@ -406,9 +417,10 @@ class Window(QMainWindow):
         self.dockWidgets.append(commentary)
 
         self.webserver = WebServer(
-            parent=None, stageWidget=self.stageWidget, commentaryWidget=commentary)
-        StateManager.webServer = self.webserver
+            parent=self, stageWidget=self.stageWidget, commentaryWidget=commentary)
         self.webserver.start()
+        self.signals.GameChanged.connect(self.webserver.ws_program_state)
+        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
 
         playerList = TSHPlayerListWidget()
         playerList.setWindowIcon(QIcon('assets/icons/list.svg'))
@@ -568,6 +580,13 @@ class Window(QMainWindow):
 
         self.optionsBt.menu().addSeparator()
 
+        # self.layoutOptions = TSHLayoutOptionsWindow(self)
+
+        # action = self.optionsBt.menu().addAction(
+        #     QApplication.translate("LayoutOptions", "Layout Options"))
+        # action.setIcon(QIcon('assets/icons/settings.svg'))
+        # action.triggered.connect(lambda: self.layoutOptions.show())
+
         action = self.optionsBt.menu().addAction(
             QApplication.translate("app", "Migrate Layout"))
         action.triggered.connect(self.MigrateWindow)
@@ -720,6 +739,8 @@ class Window(QMainWindow):
             QDesktopServices.openUrl(QUrl(asset_url)),
             help_messagebox.exec()
         ])
+        
+        self.optionsBt.menu().addSeparator()
 
         self.settingsWindow = TSHSettingsWindow(self)
 
@@ -814,11 +835,15 @@ class Window(QMainWindow):
 
         TSHCountryHelper.LoadCountries()
         self.settingsWindow.UiMounted()
+        # self.layoutOptions.UiMounted()
         TSHTournamentDataProvider.instance.UiMounted()
         TSHGameAssetManager.instance.UiMounted()
         TSHAlertNotification.instance.UiMounted()
         TSHAssetDownloader.instance.UiMounted()
         TSHHotkeys.instance.UiMounted(self)
+        TSHPlayerDB.signals.db_updated.connect(
+            self.webserver.ws_playerdb
+        )
         TSHPlayerDB.LoadDB()
 
         StateManager.ReleaseSaving()
@@ -834,7 +859,8 @@ class Window(QMainWindow):
             "name") or self.gameSelect.itemText(i) == TSHGameAssetManager.instance.selectedGame.get("codename")), None)
         if index is not None:
             self.gameSelect.setCurrentIndex(index)
-    
+            self.signals.GameChanged.emit()
+
     def Signal_GameChange(self, url):
         if url == "":
             self.gameSelect.setCurrentIndex(0)
@@ -875,6 +901,7 @@ class Window(QMainWindow):
             self.scoreboard, startgg=True)
 
     def closeEvent(self, event):
+        logger.info("Shutting down...")
         self.qtSettings.setValue("geometry", self.saveGeometry())
         self.qtSettings.setValue("windowState", self.saveState())
 
@@ -888,6 +915,23 @@ class Window(QMainWindow):
                 crashpath.unlink()
         except:
             pass
+
+        # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
+        # This is usually unsafe, but there's no easy way to terminate the flask server,
+        # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
+        #
+        # Given that this webserver is local in scope, it's reasonable to not do any
+        # connection-draining process.
+        try:
+            web_socket_fd = os.environ.get('WERKZEUG_SOCKET_FD', None)
+            if web_socket_fd:
+                sock = socket.socket(fileno=int(web_socket_fd))
+                sock.close()
+        except Exception as e:
+            logger.warning("Error closing web socket on shutdown", exc_info=True)
+
+        self.webserver.terminate()
+        self.webserver.wait()
 
     def ReloadGames(self):
         logger.info("Reload games")
@@ -971,7 +1015,7 @@ class Window(QMainWindow):
                         QLabel(QApplication.translate("app", "New version available:")+" "+myVersion+" → "+currVersion))
                     buttonReply.layout().addWidget(QLabel(release["body"]))
                     buttonReply.layout().addWidget(QLabel(
-                        QApplication.translate("app", "Update to latest version?")+"\n"+QApplication.translate("app", "NOTE: WILL BACKUP /layout/ AND OVERWRITE DATA IN ALL OTHER DIRECTORIES")))
+                        QApplication.translate("app", "Update to latest version?")+"\n\n"+QApplication.translate("app", "NOTE: This will open a new tab in your browser and close Tournament Stream Helper.")))
 
                     hbox = QHBoxLayout()
                     vbox.addLayout(hbox)
@@ -985,7 +1029,7 @@ class Window(QMainWindow):
 
                     buttonReply.show()
 
-                    def Update():
+                    def Update_Old(): # Deprecated
                         db = QFontDatabase()
                         db.removeAllApplicationFonts()
                         QFontDatabase.removeAllApplicationFonts()
@@ -1039,6 +1083,11 @@ class Window(QMainWindow):
                         worker.signals.progress.connect(progress)
                         worker.signals.finished.connect(finished)
                         self.threadpool.start(worker)
+
+                    def Update(): # Opens the releases page in the web browser
+                        latest_release_url = "https://github.com/joaorb64/TournamentStreamHelper/releases/latest"
+                        QDesktopServices.openUrl(QUrl(latest_release_url))
+                        QCoreApplication.quit()
 
                     btUpdate.clicked.connect(Update)
                     btCancel.clicked.connect(lambda: buttonReply.close())
@@ -1102,12 +1151,13 @@ class Window(QMainWindow):
             qdarktheme.setup_theme()
 
     def ToggleTopOption(self):
-        if TSHScoreboardManager.instance.GetTabAmount() > 1:
-            self.btLoadPlayerSet.setHidden(True)
-            self.btLoadPlayerSetOptions.setHidden(True)
-        else:
-            self.btLoadPlayerSet.setHidden(False)
-            self.btLoadPlayerSetOptions.setHidden(False)
+        if not SettingsManager.Get("general.hide_track_player", False):
+            if TSHScoreboardManager.instance.GetTabAmount() > 1:
+                self.btLoadPlayerSet.setHidden(True)
+                self.btLoadPlayerSetOptions.setHidden(True)
+            else:
+                self.btLoadPlayerSet.setHidden(False)
+                self.btLoadPlayerSetOptions.setHidden(False)
 
     def ChangeTab(self):
         tabNameWindow = QDialog(self)

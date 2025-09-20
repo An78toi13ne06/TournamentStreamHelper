@@ -1,4 +1,6 @@
+import math
 import platform
+import socket
 import subprocess
 
 from qtpy.QtGui import *
@@ -8,6 +10,7 @@ from qtpy import uic
 from typing import List
 from src.TSHColorButton import TSHColorButton
 from .Helpers.TSHDirHelper import TSHResolve
+from .Helpers.TSHVersionHelper import add_beta_label
 from .Helpers.TSHBskyHelper import post_to_bsky
 
 from src.TSHSelectSetWindow import TSHSelectSetWindow
@@ -192,12 +195,13 @@ class TSHScoreboardWidget(QWidget):
         # self.thumbnailBtn.setPopupMode(QToolButton.InstantPopup)
         self.thumbnailBtn.clicked.connect(self.GenerateThumbnail)
         
-        self.bskyBtn = QPushButton(
-            QApplication.translate("app", "Post to Bluesky") + " ")
-        self.bskyBtn.setIcon(QIcon('assets/icons/bsky.svg'))
-        self.bskyBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        col.layout().addWidget(self.bskyBtn, Qt.AlignmentFlag.AlignRight)
-        self.bskyBtn.clicked.connect(self.PostToBsky)
+        if SettingsManager.Get("bsky_account.enable_bluesky", True):
+            self.bskyBtn = QPushButton(
+                QApplication.translate("app", "Post to Bluesky") + " ")
+            self.bskyBtn.setIcon(QIcon('assets/icons/bsky.svg'))
+            self.bskyBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+            col.layout().addWidget(self.bskyBtn, Qt.AlignmentFlag.AlignRight)
+            self.bskyBtn.clicked.connect(self.PostToBsky)
 
         # VISIBILITY
         col = QWidget()
@@ -218,11 +222,11 @@ class TSHScoreboardWidget(QWidget):
         menu.addSection("Players")
 
         self.elements = [
-            ["Real Name",              ["real_name", "real_nameLabel"],       "show_name"],
+            ["Real Name",              ["real_name"],                         "show_name"],
             ["Twitter",                ["twitter", "twitterLabel"],           "show_social"],
             ["Location",               ["locationLabel", "state", "country"], "show_location"],
             ["Characters",             ["characters"],                        "show_characters"],
-            ["Pronouns",               ["pronoun", "pronounLabel"],           "show_pronouns"],
+            ["Pronouns",               ["pronoun"],                           "show_pronouns"],
             ["Controller",             ["controller", "controllerLabel"],     "show_controller"],
             ["Additional information", ["custom_textbox"],                    "show_additional"],
         ]
@@ -258,16 +262,17 @@ class TSHScoreboardWidget(QWidget):
 
         self.innerWidget.layout().addWidget(bottomOptions)
 
-        self.streamUrl = QHBoxLayout()
-        self.streamUrlLabel = QLabel(QApplication.translate("app", "Stream URL") + " ")
-        self.streamUrl.layout().addWidget(self.streamUrlLabel)
-        self.streamUrlTextBox = QLineEdit()
-        self.streamUrl.layout().addWidget(self.streamUrlTextBox)
-        self.streamUrlTextBox.editingFinished.connect(
-            lambda element=self.streamUrlTextBox: StateManager.Set(
-                f"score.{self.scoreboardNumber}.stream_url", element.text()))
-        self.streamUrlTextBox.editingFinished.emit()
-        bottomOptions.layout().addLayout(self.streamUrl)
+        if SettingsManager.Get("bsky_account.enable_bluesky", True):
+            self.streamUrl = QHBoxLayout()
+            self.streamUrlLabel = QLabel(QApplication.translate("app", "Stream URL") + " ")
+            self.streamUrl.layout().addWidget(self.streamUrlLabel)
+            self.streamUrlTextBox = QLineEdit()
+            self.streamUrl.layout().addWidget(self.streamUrlTextBox)
+            self.streamUrlTextBox.editingFinished.connect(
+                lambda element=self.streamUrlTextBox: StateManager.Set(
+                    f"score.{self.scoreboardNumber}.stream_url", element.text()))
+            self.streamUrlTextBox.editingFinished.emit()
+            bottomOptions.layout().addLayout(self.streamUrl)
 
         self.btSelectSet = QPushButton(
             QApplication.translate("app", "Load set"))
@@ -311,6 +316,15 @@ class TSHScoreboardWidget(QWidget):
                 self.LoadUserSetOptionsClicked)
             hbox.addWidget(self.btLoadPlayerSetOptions)
 
+        self.remoteScoreboardLabel = QApplication.translate(
+                "app", "Open {0} in a browser to edit the scoreboard remotely."
+            ).format(f"<a href='http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard'>http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard</a>")
+        self.remoteScoreboardLabel = add_beta_label(self.remoteScoreboardLabel, "web_score")
+        self.remoteScoreboardLabel = QLabel(self.remoteScoreboardLabel)
+
+        self.remoteScoreboardLabel.setOpenExternalLinks(True)
+        bottomOptions.layout().addWidget(self.remoteScoreboardLabel)
+
         TSHTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateBottomButtons)
         TSHTournamentDataProvider.instance.signals.tournament_changed.emit()
@@ -342,13 +356,14 @@ class TSHScoreboardWidget(QWidget):
         self.team1column.findChild(QLabel, "teamLabel").setText(
             QApplication.translate("app", "TEAM {0}").format(1))
 
-        DEFAULT_TEAM1_COLOR = 'rgb(254, 54, 54)'
-
+        DEFAULT_TEAM1_COLOR = SettingsManager.Get("general.team_1_default_color", "#fe3636")
         self.colorButton1 = TSHColorButton(color=DEFAULT_TEAM1_COLOR)
         # self.colorButton1.setText(QApplication.translate("app", "COLOR"))
         self.colorButton1.colorChanged.connect(
             lambda color: [
-                self.CommandTeamColor(0, color)
+                StateManager.BlockSaving(),
+                StateManager.Set(f"score.{self.scoreboardNumber}.team.1.color", color),
+                StateManager.ReleaseSaving()
             ])
         self.CommandTeamColor(0, DEFAULT_TEAM1_COLOR)
 
@@ -382,15 +397,17 @@ class TSHScoreboardWidget(QWidget):
         self.team2column.findChild(QLabel, "teamLabel").setText(
             QApplication.translate("app", "TEAM {0}").format(2))
 
-        DEFAULT_TEAM2_COLOR = 'rgb(46, 137, 255)'
-
+        DEFAULT_TEAM2_COLOR = SettingsManager.Get("general.team_2_default_color", "#2e89ff")
         self.colorButton2 = TSHColorButton(color=DEFAULT_TEAM2_COLOR)
         self.colorButton2.colorChanged.connect(
             lambda color: [
-                self.CommandTeamColor(1, color)
+                StateManager.BlockSaving(),
+                StateManager.Set(f"score.{self.scoreboardNumber}.team.2.color", color),
+                StateManager.ReleaseSaving()
             ])
         # self.colorButton2.setText(QApplication.translate("app", "COLOR"))
         self.CommandTeamColor(1, DEFAULT_TEAM2_COLOR)
+
         self.team2column.findChild(QHBoxLayout, "horizontalLayout_2").layout(
         ).insertWidget(0, self.colorButton2)
 
@@ -438,10 +455,20 @@ class TSHScoreboardWidget(QWidget):
 
         self.scoreColumn.findChild(QSpinBox, "best_of").valueChanged.connect(
             lambda value: [
+                StateManager.BlockSaving(),
                 StateManager.Set(
                     f"score.{self.scoreboardNumber}.best_of", value),
+                StateManager.Set(
+                    f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}"),
                 StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", TSHLocaleHelper.matchNames.get(
                     "best_of").format(value) if value > 0 else ""),
+                StateManager.Set(
+                    f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2)),
+                StateManager.Set(
+                    f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}"),
+                StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", TSHLocaleHelper.matchNames.get(
+                    "first_to").format(math.ceil(value/2)) if value > 0 else ""),
+                StateManager.ReleaseSaving()
             ]
         )
         self.scoreColumn.findChild(QSpinBox, "best_of").valueChanged.emit(0)
@@ -523,6 +550,10 @@ class TSHScoreboardWidget(QWidget):
             self.SetDefaultsFromAssets
         )
 
+    def closeEvent(self, event):
+        self.autoUpdateTimer.stop()
+        self.timeLeftTimer.stop()
+
     def ExportTeamLogo(self, team, value):
         if os.path.exists(f"./user_data/team_logo/{value.lower()}.png"):
             StateManager.Set(f"score.{self.scoreboardNumber}.team.{team}.logo",
@@ -531,19 +562,21 @@ class TSHScoreboardWidget(QWidget):
             StateManager.Set(
                 f"score.{self.scoreboardNumber}.team.{team}.logo", None)
 
-    def GenerateThumbnail(self, quiet_mode=False):
-        msgBox = QMessageBox()
-        msgBox.setWindowIcon(QIcon('assets/icons/icon.png'))
-        msgBox.setWindowTitle(QApplication.translate(
-            "thumb_app", "TSH - Thumbnail"))
+    def GenerateThumbnail(self, quiet_mode=False, disable_msgbox=False):
+        if not disable_msgbox:
+            msgBox = QMessageBox()
+            msgBox.setWindowIcon(QIcon('assets/icons/icon.png'))
+            msgBox.setWindowTitle(QApplication.translate(
+                "thumb_app", "TSH - Thumbnail"))
         try:
             thumbnailPath = thumbnail.generate(
                 settingsManager=SettingsManager, scoreboardNumber=self.scoreboardNumber)
-            msgBox.setText(QApplication.translate(
-                "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath + "\n\n" + QApplication.translate(
-                "thumb_app", "The video title and description have also been generated."))
-            msgBox.setIcon(QMessageBox.NoIcon)
-            # msgBox.setInformativeText(thumbnailPath)
+            if not disable_msgbox:
+                msgBox.setText(QApplication.translate(
+                    "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath + "\n\n" + QApplication.translate(
+                    "thumb_app", "The video title and description have also been generated."))
+                msgBox.setIcon(QMessageBox.NoIcon)
+                # msgBox.setInformativeText(thumbnailPath)
 
             thumbnail_settings = SettingsManager.Get("thumbnail_config")
             if not quiet_mode:
@@ -559,14 +592,18 @@ class TSHScoreboardWidget(QWidget):
                     else:
                         subprocess.Popen(["xdg-open", outThumbDir])
                 else:
-                    msgBox.exec()
+                    if not disable_msgbox:
+                        msgBox.exec()
             else:
                 return(thumbnailPath)
         except Exception as e:
-            msgBox.setText(QApplication.translate("app", "Warning"))
-            msgBox.setInformativeText(str(e))
-            msgBox.setIcon(QMessageBox.Warning)
-            msgBox.exec()
+            if not disable_msgbox:
+                msgBox.setText(QApplication.translate("app", "Warning"))
+                msgBox.setInformativeText(str(e))
+                msgBox.setIcon(QMessageBox.Warning)
+                msgBox.exec()
+            else:
+                raise e
     
     def PostToBsky(self):
         thumbnailPath = self.GenerateThumbnail(quiet_mode=True)
@@ -617,8 +654,7 @@ class TSHScoreboardWidget(QWidget):
             p = TSHScoreboardPlayerWidget(
                 index=len(self.team1playerWidgets)+1,
                 teamNumber=1,
-                path=f'score.{self.scoreboardNumber}.team.{1}.player.{len(self.team1playerWidgets)+1}',
-                scoreboardNumber=self.scoreboardNumber)
+                path=f'score.{self.scoreboardNumber}.team.{1}.player.{len(self.team1playerWidgets)+1}')
             self.playerWidgets.append(p)
 
             self.team1column.findChild(
@@ -640,14 +676,15 @@ class TSHScoreboardWidget(QWidget):
                 self.stats.signals.LastSetsP1Signal.emit)
             p.instanceSignals.player1Id_changed.connect(
                 self.stats.signals.PlayerHistoryStandingsP1Signal.emit)
+            p.instanceSignals.player_seed_changed.connect(
+                self.stats.signals.UpsetFactorCalculation.emit)
 
             self.team1playerWidgets.append(p)
 
             p = TSHScoreboardPlayerWidget(
                 index=len(self.team2playerWidgets)+1,
                 teamNumber=2,
-                path=f'score.{self.scoreboardNumber}.team.{2}.player.{len(self.team2playerWidgets)+1}',
-                scoreboardNumber=self.scoreboardNumber)
+                path=f'score.{self.scoreboardNumber}.team.{2}.player.{len(self.team2playerWidgets)+1}')
             self.playerWidgets.append(p)
 
             self.team2column.findChild(
@@ -669,6 +706,8 @@ class TSHScoreboardWidget(QWidget):
                 self.stats.signals.LastSetsP2Signal.emit)
             p.instanceSignals.player2Id_changed.connect(
                 self.stats.signals.PlayerHistoryStandingsP2Signal.emit)
+            p.instanceSignals.player_seed_changed.connect(
+                self.stats.signals.UpsetFactorCalculation.emit)
 
             self.team2playerWidgets.append(p)
 
@@ -697,6 +736,8 @@ class TSHScoreboardWidget(QWidget):
         if number > 1:
             self.team1column.findChild(QLineEdit, "teamName").setVisible(True)
             self.team2column.findChild(QLineEdit, "teamName").setVisible(True)
+            self.team1column.findChild(QLabel, "teamLabel").setVisible(False)
+            self.team2column.findChild(QLabel, "teamLabel").setVisible(False)
         else:
             self.team1column.findChild(QLineEdit, "teamName").setVisible(False)
             self.team1column.findChild(QLineEdit, "teamName").setText("")
@@ -706,6 +747,8 @@ class TSHScoreboardWidget(QWidget):
             self.team2column.findChild(QLineEdit, "teamName").setText("")
             self.team2column.findChild(
                 QLineEdit, "teamName").editingFinished.emit()
+            self.team1column.findChild(QLabel, "teamLabel").setVisible(True)
+            self.team2column.findChild(QLabel, "teamLabel").setVisible(True)
 
         for x, element in enumerate(self.elements, start=1):
             action: QAction = self.eyeBt.menu().actions()[x]
@@ -792,17 +835,21 @@ class TSHScoreboardWidget(QWidget):
             self.timerLayout.setVisible(True)
 
             if data.get("auto_update") == "set":
-                self.labelAutoUpdate.setText("Auto update (Set)")
+                self.labelAutoUpdate.setText(
+                    QApplication.translate("app", "Auto update (Set)")
+                    )
             elif data.get("auto_update") == "stream":
                 self.labelAutoUpdate.setText(
-                    f"Auto update (Stream [{self.lastStationSelected.get('identifier')}])")
+                    QApplication.translate("app", "Auto update (Stream [{0}])").format(self.lastStationSelected.get('identifier'))
+                    )
             elif data.get("auto_update") == "station":
                 self.labelAutoUpdate.setText(
-                    f"Auto update (Station [{self.lastStationSelected.get('identifier')}])")
+                    QApplication.translate("app", "Auto update (Station [{0}])").format(self.lastStationSelected.get('identifier'))
+                    )
             elif data.get("auto_update") == "user":
-                self.labelAutoUpdate.setText("Auto update (User)")
+                self.labelAutoUpdate.setText(QApplication.translate("app", "Auto update (User)"))
             else:
-                self.labelAutoUpdate.setText("Auto update")
+                self.labelAutoUpdate.setText(QApplication.translate("app", "Auto update"))
 
         # Lock all player widgets
         for p in self.playerWidgets:
@@ -982,6 +1029,7 @@ class TSHScoreboardWidget(QWidget):
                     QComboBox, "match").setCurrentText(round_name)
                 self.scoreColumn.findChild(
                     QComboBox, "match").lineEdit().editingFinished.emit()
+                StateManager.Set(f"score.{self.scoreboardNumber}.match", round_name)
 
             tournament_phase = data.get("tournament_phase")
             if tournament_phase:
@@ -989,18 +1037,25 @@ class TSHScoreboardWidget(QWidget):
                 # check if this isn't pools and isn't a qualifier
                 round_division = data.get("roundDivision", 0)
                 if round_division:
-                    if data.get("isPools", False) is False and round_division > 6:
+                    if data.get("isPools", False) is False:
+                        phase = tournament_phase
                         original_str = tournament_phase.split(" - ")
-                        tournament_phase = TSHLocaleHelper.phaseNames.get("top_n", "Top {0}").format(round_division)
+                        if round_division > 4:
+                            tournament_phase = TSHLocaleHelper.phaseNames.get("top_n", "Top {0}").format(round_division)
+                        elif round_division <= 4:
+                            tournament_phase = TSHLocaleHelper.phaseNames.get("top_n", "Top {0}").format(4)
 
                         # Include "Bracket - XYZ" similar to if it's Pools
                         if len(original_str) > 1:
                             tournament_phase = f"{original_str[0]} - {tournament_phase}"
+                        elif "Top" not in phase:
+                            tournament_phase = f"{phase} - {tournament_phase}"
 
                 self.scoreColumn.findChild(
                     QComboBox, "phase").setCurrentText(tournament_phase)
                 self.scoreColumn.findChild(
                     QComboBox, "phase").lineEdit().editingFinished.emit()
+                StateManager.Set(f"score.{self.scoreboardNumber}.phase", tournament_phase)
 
             scoreContainers = [
                 self.scoreColumn.findChild(QSpinBox, "score_left"),
@@ -1012,11 +1067,18 @@ class TSHScoreboardWidget(QWidget):
             if data.get("reset_score"):
                 scoreContainers[0].setValue(0)
                 scoreContainers[1].setValue(0)
-
-            if data.get("team1score"):
-                scoreContainers[0].setValue(data.get("team1score"))
-            if data.get("team2score"):
-                scoreContainers[1].setValue(data.get("team2score"))
+            if not SettingsManager.Get("general.disable_scoreupdate", False):
+                if data.get("team1score") is not None:
+                    if data.get("team1score") != 0:
+                        scoreContainers[0].setValue(data.get("team1score"))
+                    else:
+                        scoreContainers[0].setValue(0)
+                if data.get("team2score") is not None:
+                    if data.get("team2score") != 0:
+                        scoreContainers[1].setValue(data.get("team2score"))
+                    else:
+                        scoreContainers[1].setValue(0)
+            
             if data.get("bestOf"):
                 self.scoreColumn.findChild(
                     QSpinBox, "best_of").setValue(data.get("bestOf"))
@@ -1028,7 +1090,7 @@ class TSHScoreboardWidget(QWidget):
             if self.teamsSwapped:
                 losersContainers.reverse()
 
-            if data.get("stream"):
+            if SettingsManager.Get("bsky_account.enable_bluesky", True) and data.get("stream"):
                 self.streamUrlTextBox.setText(data.get("stream"))
                 self.streamUrlTextBox.editingFinished.emit()
 
@@ -1096,6 +1158,8 @@ class TSHScoreboardWidget(QWidget):
 
                     teamInstance[player].SetData(
                         data.get("data"), False, False)
+                    if data.get("data", {}).get("savePlayerToDb", False):
+                        teamInstance[player].SavePlayerToDB()
                 except Exception as e:
                     logger.error(f"Error while setting entrants: {e}")
                 finally:
@@ -1160,3 +1224,16 @@ class TSHScoreboardWidget(QWidget):
         print(players, "players", characters, "characters")
         self.playerNumber.setValue(players)
         self.charNumber.setValue(characters)
+
+    def GetIP(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # doesn't even have to be reachable
+            s.connect(('10.255.255.255', 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = '127.0.0.1'
+        finally:
+            s.close()
+        return IP
+    pass
