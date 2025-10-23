@@ -100,6 +100,13 @@ logger.add(
     rotation="20 MB"
 )
 
+try:
+    # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
+    App.setWindowIcon(QIcon("assets/icons/icon.png"))
+except:
+    logger.opt(exception=True).warning("Could not set window icon for QApplication.")
+
+
 logger.critical("=== TSH IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
@@ -421,6 +428,7 @@ class Window(QMainWindow):
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
 
         playerList = TSHPlayerListWidget()
         playerList.setWindowIcon(QIcon('assets/icons/list.svg'))
@@ -786,8 +794,40 @@ class Window(QMainWindow):
         TSHTournamentDataProvider.instance.signals.tournament_url_update.connect(
             self.Signal_GameChange)
 
+        label_margin = " "*5
+
+        # Modded content UI
+        self.moddedContentWidget = QWidget()
+        moddedContentLayout = QHBoxLayout()
+        self.moddedContentWidget.setLayout(moddedContentLayout)
+        self.moddedContentCheck = QCheckBox()
+        self.moddedContentWidget.setVisible(False)
+        self.moddedContentCheck.setChecked(False)
+        moddedContentCheckLabel = QLabel()
+        moddedContentCheckLabel.setText(label_margin + QApplication.translate("app", "Modded content"))
+        self.moddedContentWidget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        moddedContentLayout.addWidget(moddedContentCheckLabel)
+        moddedContentLayout.addWidget(self.moddedContentCheck)
+
+        TSHGameAssetManager.instance.signals.onLoad.connect(lambda x=None: [
+            self.moddedContentWidget.setVisible(TSHGameAssetManager.instance.has_modded_content),
+            self.moddedContentCheck.setChecked(StateManager.Get("game").get("mods_active", False))
+        ])
+
+        self.moddedContentCheck.stateChanged.connect(lambda x=None: [
+            print("Checked: "+ str(self.moddedContentCheck.isChecked())),
+            TSHGameAssetManager.instance.LoadGameAssets(self.gameSelect.currentData(), mods_active=self.moddedContentCheck.isChecked(), mods_reload_mode=True)
+        ]
+        )
+
+        self.gameSelect.activated.connect(
+            lambda x=None: self.moddedContentCheck.setChecked(False))
+        TSHTournamentDataProvider.instance.signals.tournament_changed.connect(
+            lambda x=None: self.moddedContentCheck.setChecked(False))
+
         pre_base_layout.addLayout(base_layout)
         hbox.addWidget(self.gameSelect)
+        hbox.addWidget(self.moddedContentWidget)
 
         self.scoreboardAmount = QSpinBox()
         self.scoreboardAmount.setMaximumWidth(100)
@@ -801,7 +841,6 @@ class Window(QMainWindow):
                 val)
         )
 
-        label_margin = " "*18
         label = QLabel(
             label_margin + QApplication.translate("app", "Number of Scoreboards"))
         label.setSizePolicy(QSizePolicy.Policy.Fixed,
@@ -854,7 +893,7 @@ class Window(QMainWindow):
 
         DownloadLayoutsOnBoot()
 
-    def SetGame(self):
+    def SetGame(self, mods_active = False):
         index = next((i for i in range(self.gameSelect.model().rowCount()) if self.gameSelect.itemText(i) == TSHGameAssetManager.instance.selectedGame.get(
             "name") or self.gameSelect.itemText(i) == TSHGameAssetManager.instance.selectedGame.get("codename")), None)
         if index is not None:

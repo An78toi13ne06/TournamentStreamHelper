@@ -1,9 +1,8 @@
 import {Autocomplete, MenuItem, Stack} from "@mui/material";
-import {TSHCharacterContext} from "./Contexts";
 import TextField from "./TextField";
-import {useContext} from "react";
 import i18n from "i18next";
 import {BACKEND_PORT} from "../env";
+import {useSelector} from "react-redux";
 
 /**
  * @typedef {{
@@ -31,7 +30,7 @@ export function CharSelector({
     onCharSkinChanged,
     stackProps,
  }) {
-    const /** @type {TSHCharacterDb} */ characters = useContext(TSHCharacterContext);
+    const /** @type {TSHCharacterDb} */ characters = useSelector((state) => state.tshCharacters.characters);
     const hasCharName = charName && charName !== '';
 
     return (
@@ -44,15 +43,16 @@ export function CharSelector({
             sx={{width: '50%'}}
             onChange={onCharNameChanged}
             getOptionLabel={(char) => char?.display_name ?? char}
-            renderOption={(props, option, _) => {
+            renderOption={(_allProps, option, _) => {
+                const {key, ..._props} = _allProps;
                 let skimage = option?.skins?.[0]?.assets?.['base_files/icon']?.['asset']
                 if (!!skimage) {
                     skimage = skimage.replace("./", "");
                 }
 
-                return <li {...props}>
+                return <li key={key} {..._props}>
                     {skimage
-                        ? <img height="32" width="32" alt={`Skin ${charSkin}`}
+                        ? <img height="32" alt={`Skin ${charSkin}`}
                                src={`http://${window.location.hostname}:${BACKEND_PORT}/${skimage}`}/>
                         : <div style={{height: '32px', width: '32px'}}/>
                     }
